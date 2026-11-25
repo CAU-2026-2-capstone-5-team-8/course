@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<title>SnapSpot 코스</title>
+<style>
+  :root { --ink:#191F28; --ink2:#4E5968; --muted:#6B7684; --line:#E5E8EB; --bg:#F2F4F6; --card:#fff; --lime:#D9F99D; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; letter-spacing:-.3px; }
+  main { max-width:520px; margin:0 auto; padding:28px 16px 40px; }
+  .kicker { color:var(--ink2); font-size:13px; font-weight:600; margin:0 0 2px 4px; }
+  h1 { font-size:24px; line-height:32px; margin:0 0 16px 4px; }
+  .card { background:var(--card); border-radius:10px; }
+  svg { display:block; width:100%; height:auto; }
+  .note { color:var(--muted); font-size:12px; margin:8px 4px 20px; }
+  ol { list-style:none; margin:0; padding:0; }
+  .stop { display:flex; gap:12px; padding:14px; }
+  .num { flex:none; width:28px; height:28px; border-radius:50%; background:var(--ink); color:var(--lime); font-weight:700; font-size:14px; display:grid; place-items:center; }
+  .name { font-weight:700; font-size:16px; overflow-wrap:anywhere; }
+  .meta { color:var(--muted); font-size:13px; overflow-wrap:anywhere; }
+  a { color:var(--ink); font-weight:600; font-size:14px; text-underline-offset:3px; }
+  .map { display:inline-block; padding:6px 0; }
+  .leg { padding:4px 0 4px 27px; margin-left:0; }
+  .leg a { display:block; border-left:2px solid var(--line); padding:8px 0 8px 26px; color:var(--ink2); font-size:13px; }
+  .open { display:block; text-align:center; background:var(--ink); color:#fff; border-radius:10px; padding:16px; margin-top:24px; text-decoration:none; font-size:15px; }
+  .last { margin-top:20px; }
+  :focus-visible { outline:3px solid #65A30D; outline-offset:2px; }
+</style>
+</head>
+<body>
+<main id="app"><p class="note">불러오는 중이에요.</p><noscript>이 페이지는 자바스크립트가 켜져 있어야 보여요.</noscript></main>
+<script>
+// Everything shown here comes from the part of the address after '#', which browsers never send to a server.
+const MAX = 10, MAX_BYTES = 16 * 1024;
+const app = document.getElementById('app');
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const svgEl = (tag, attrs, text) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+
+async function unpack(b64) {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const parts = []; let size = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > MAX_BYTES) throw new Error('too big'); parts.push(value); }
+  return new TextDecoder().decode(await new Blob(parts).arrayBuffer());
+}
+function readPlaces(body) {
+  const lines = body.split('\n');
+  if (lines[0] !== 'c' && lines[0] !== 'p') throw new Error('kind');
+  const places = lines.slice(1, MAX + 1).map(l => {
+    const f = l.split('\t'); const lat = parseInt(f[3], 10) / 1e5, lng = parseInt(f[4], 10) / 1e5;
+    if (f.length < 8 || !f[0] || !(Math.abs(lat) <= 90) || !(Math.abs(lng) <= 180)) return null;
+    return { name: f[0].slice(0, 60), address: f[1].slice(0, 100), category: f[2].slice(0, 30), lat, lng, end: /^\d{4}-\d{2}-\d{2}$/.test(f[6]) ? f[6] : '', id: /^\d{1,15}$/.test(f[7]) ? f[7] : '' };
+  }).filter(Boolean);
+  if (!places.length) throw new Error('empty');
+  return { course: lines[0] === 'c', places };
+}
+const point = p => encodeURIComponent(p.name.replace(/[\/,]/g, ' ')) + ',' + p.lat + ',' + p.lng;
+const link = (cls, href, text) => { const a = el('a', cls, text); a.href = href; a.rel = 'noreferrer'; return a; };
+
+function sketch(places, course) {
+  const W = 480, H = 300, pad = 44, k = Math.cos(places[0].lat * Math.PI / 180);
+  const xs = places.map(p => p.lng * k), ys = places.map(p => p.lat);
+  const w = Math.max(...xs) - Math.min(...xs) || 1e-4, h = Math.max(...ys) - Math.min(...ys) || 1e-4;
+  const s = Math.min((W - 2 * pad) / w, (H - 2 * pad) / h);
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  const at = i => [W / 2 + (xs[i] - cx) * s, H / 2 - (ys[i] - cy) * s];
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': '방문 순서를 이은 그림' });
+  if (course) svg.append(svgEl('polyline', { points: places.map((_, i) => at(i).join(',')).join(' '), fill: 'none', stroke: '#191F28', 'stroke-width': 4, 'stroke-linejoin': 'round' }));
+  places.forEach((p, i) => {
+    const [x, y] = at(i);
+    svg.append(svgEl('circle', { cx: x, cy: y, r: 15, fill: '#191F28', stroke: '#fff', 'stroke-width': 3 }));
+    svg.append(svgEl('text', { x, y: y + 5, 'text-anchor': 'middle', 'font-size': 15, 'font-weight': 700, fill: '#D9F99D' }, i + 1));
+  });
+  return svg;
+}
+function show({ course, places }, packed) {
+  app.replaceChildren();
+  app.append(el('p', 'kicker', 'SnapSpot으로 공유받았어요'), el('h1', '', course ? `${places.length}곳을 도는 코스` : `장소 ${places.length}곳`));
+  if (places.length > 1) { const c = el('div', 'card'); c.append(sketch(places, course)); app.append(c, el('p', 'note', course ? '방문 순서를 직선으로 이은 그림이에요. 실제 길은 아래 "걷는 길 보기"에서 볼 수 있어요.' : '장소의 위치를 나타낸 그림이에요.')); }
+  const ol = el('ol', 'card');
+  places.forEach((p, i) => {
+    const li = el('li'), row = el('div', 'stop'), box = el('div');
+    box.append(el('div', 'name', p.name), el('div', 'meta', [p.category, p.address].filter(Boolean).join(' · ')));
+    if (p.end) box.append(el('div', 'meta', p.end + '까지'));
+    box.append(link('map', p.id ? 'https://place.map.kakao.com/' + p.id : 'https://map.kakao.com/link/map/' + point(p), '카카오맵에서 보기'));
+    row.append(el('div', 'num', i + 1), box); li.append(row);
+    if (course && places[i + 1]) { const leg = el('div', 'leg'); leg.append(link('', 'https://map.kakao.com/link/by/walk/' + point(p) + '/' + point(places[i + 1]), `${i + 2}번까지 걷는 길 보기`)); li.append(leg); }
+    ol.append(li);
+  });
+  app.append(ol);
+  // SnapSpot is an Android app: elsewhere the link would only show an error.
+  if (/Android/i.test(navigator.userAgent)) app.append(link('open', 'snapspot://import?v=1&d=' + packed, 'SnapSpot에서 열기'));
+  app.append(el('p', 'note last', 'SnapSpot은 저장한 장소 근처를 지날 때 알려 주는 안드로이드 앱이에요. 앱이 있으면 이 QR을 앱에서 찍어 장소를 저장할 수 있어요. 여기 보이는 내용은 QR에 담겨 있고 서버로 보내거나 저장하지 않아요.'));
+}
+async function start() {
+  try {
+    if (typeof DecompressionStream === 'undefined') throw new Error('old browser');
+    const m = /^#1\.([A-Za-z0-9_-]+)$/.exec(location.hash);
+    if (!m) throw new Error('no data');
+    show(readPlaces(await unpack(m[1])), m[1]);
+  } catch (e) {
+    const old = e.message === 'old browser';
+    app.replaceChildren(el('h1', '', '코스를 읽지 못했어요'), el('p', 'note', old ? '브라우저가 오래돼서 보여 드릴 수 없어요. 업데이트한 뒤 다시 열어 주세요.' : 'QR이 잘렸거나 주소가 바뀐 것 같아요. 다시 찍어 보세요.'));
+  }
+}
+addEventListener('hashchange', start);
+start();
+</script>
+</body>
+</html>
