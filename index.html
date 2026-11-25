@@ -41,13 +41,14 @@ const app = document.getElementById('app');
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const svgEl = (tag, attrs, text) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
 
-async function unpack(b64) {
+// Version 1 is raw deflate; version 2 carries a checksum, so a changed address is refused instead of shown garbled.
+async function unpack(version, b64) {
   const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
   const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(version === '1' ? 'deflate-raw' : 'deflate')).getReader();
   const parts = []; let size = 0;
   for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > MAX_BYTES) throw new Error('too big'); parts.push(value); }
-  return new TextDecoder().decode(await new Blob(parts).arrayBuffer());
+  return new TextDecoder('utf-8', { fatal: true }).decode(await new Blob(parts).arrayBuffer());
 }
 function readPlaces(body) {
   const lines = body.split('\n');
@@ -95,15 +96,15 @@ function show({ course, places }, packed) {
   });
   app.append(ol);
   // SnapSpot is an Android app: elsewhere the link would only show an error.
-  if (/Android/i.test(navigator.userAgent)) app.append(link('open', 'snapspot://import?v=1&d=' + packed, 'SnapSpot에서 열기'));
+  if (/Android/i.test(navigator.userAgent)) app.append(link('open', 'snapspot://import?' + packed, 'SnapSpot에서 열기'));
   app.append(el('p', 'note last', 'SnapSpot은 저장한 장소 근처를 지날 때 알려 주는 안드로이드 앱이에요. 앱이 있으면 이 QR을 앱에서 찍어 장소를 저장할 수 있어요. 여기 보이는 내용은 QR에 담겨 있고 서버로 보내거나 저장하지 않아요.'));
 }
 async function start() {
   try {
     if (typeof DecompressionStream === 'undefined') throw new Error('old browser');
-    const m = /^#1\.([A-Za-z0-9_-]+)$/.exec(location.hash);
+    const m = /^#([12])\.([A-Za-z0-9_-]+)$/.exec(location.hash);
     if (!m) throw new Error('no data');
-    show(readPlaces(await unpack(m[1])), m[1]);
+    show(readPlaces(await unpack(m[1], m[2])), 'v=' + m[1] + '&d=' + m[2]);
   } catch (e) {
     const old = e.message === 'old browser';
     app.replaceChildren(el('h1', '', '코스를 읽지 못했어요'), el('p', 'note', old ? '브라우저가 오래돼서 보여 드릴 수 없어요. 업데이트한 뒤 다시 열어 주세요.' : 'QR이 잘렸거나 주소가 바뀐 것 같아요. 다시 찍어 보세요.'));
