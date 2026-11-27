@@ -52,7 +52,8 @@
 <script src="leaflet.js"></script>
 <script>
 // The places come from the part of the address after '#', which browsers never send to a server.
-const MAX = 10, MAX_BYTES = 16 * 1024;
+// As many places as the app puts in one code (MAX_SHARE in core/ShareCode.kt); how many really fit depends on their names.
+const MAX = 20, MAX_BYTES = 16 * 1024;
 const MEALS = { l: ['점심', '11:30~13:30'], d: ['저녁', '17:30~19:30'] };
 const app = document.getElementById('app');
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
